@@ -311,7 +311,7 @@ This repository builds on the following open-source codebases:
 
 The Interaction Tensor framework used for feature-level analysis is based on:
 
-> Ge et al., "Revisiting Data-Free Knowledge Distillation with Poisoned Teachers," arXiv:2306.04793 (2023)
+> Jiang et al., "On the Joint Interaction of Models, Data, and Features," arXiv:2306.04793 (2023)
 
 This work was supported in part by IITP grants (No. RS-2024-00395824, No. RS-2025-02214652) funded by the Korea Government (MSIT).
 
