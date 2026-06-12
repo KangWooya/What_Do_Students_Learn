@@ -235,7 +235,7 @@ uv run python main.py --data_type cifar100 --data_path /path/to/data \
 
 ## Interaction Tensor Construction
 
-The Interaction Tensor framework is based on Ge et al. (2023) — [arXiv:2306.04793](https://arxiv.org/abs/2306.04793). We adapt it for cross-model feature comparison across knowledge distillation methods.
+The Interaction Tensor framework is based on Jiang et al. (2023) — [arXiv:2306.04793](https://arxiv.org/abs/2306.04793). We adapt it for cross-model feature comparison across knowledge distillation methods.
 
 To recompute IT tensors from trained checkpoints, use the standalone script:
 
