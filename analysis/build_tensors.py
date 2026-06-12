@@ -1,14 +1,18 @@
 """
 Build Interaction Tensors from trained checkpoints.
 
-Implements the pipeline described in Section 3.2 of the paper:
-  1. Hook intermediate-layer activations for M models over the test set
-  2. PCA(50) per model  →  (M, N, 50)
-  3. Pairwise cross-model correlation  →  Λ ∈ R^(M×M×K×K)
-  4. Greedy cross-model clustering (Algorithm 1)  →  assignment (M, K)
-  5. L∞-normalize and threshold activations  →  binary (M, N, K)
-  6. Aggregate by cluster  →  Ω ∈ {0,1}^(M×N×T)
-  7. Save to interaction_tensors/
+Implements the pipeline from Section 3.2 of the paper, directly
+derived from the analysis notebooks (1_kd_analysis.ipynb Cells 28–37,
+2_cd_it_analysis.ipynb Cells 18–24). Based on the Interaction Tensor
+framework of Ge et al. (2023) — arXiv:2306.04793.
+
+Pipeline (both targets):
+  1. Hook activations for M models over the test set  →  PI_matrices
+  2. PCA(50) per model                                →  PI_proj_tensor (M, N, 50)
+  3. Cross-model correlation                          →  corr_tensor (M, M, K, K)
+  4. Greedy clustering (Algorithm 1)                  →  assignment (M, K)
+  5. L∞-normalize + threshold                         →  data_feature (M, N, K)
+  6. Aggregate by cluster                             →  interaction_tensor Ω (M, N, T)
 
 Usage:
     # KD tensor  (20 KD students + 20 baselines + 20 teachers, hook: conv5_x)
@@ -26,7 +30,6 @@ import argparse
 import os
 from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torchvision
@@ -141,176 +144,247 @@ def make_testloader(data_dir, batch_size=100):
     return torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
 
 
-# ── Step 1: Collect activations via forward hook ──────────────────────────
-def collect_activations(model, hook_layer, testloader, device):
-    """Run model over testloader, collect flattened activations at hook_layer."""
-    buf = []
+# ══ Step 1 ── Collect activations via forward hook ════════════════════════
+# Notebook 1 Cell 28 (KD):  make_PI_with_hook — conv5_x, M=60
+# Notebook 2 Cell 18 (CD):  make_PI_with_hook — avg_pool, M=40
+#
+# Returns PI_matrices: dict {"PI_matrix_m{i}": Tensor(N, D)} on CPU
 
-    def hook_fn(module, inp, out):
-        buf.append(torch.flatten(out, 1).detach().cpu())
-
-    handle = hook_layer.register_forward_hook(hook_fn)
-    model.eval()
-    with torch.no_grad():
-        for images, _ in testloader:
-            model(images.to(device))
-    handle.remove()
-    return torch.cat(buf, dim=0)   # (N, D)
-
-
-# ── Step 2: PCA(50) per model ─────────────────────────────────────────────
-def pca_project(pi_matrices, n_components=50):
+def make_PI_with_hook_kd(testloader, device):
     """
-    pi_matrices: list of (N, D) CPU tensors, one per model.
-    Returns: (M, N, 50) tensor.
+    60 models: [1–20] KD students, [21–40] baselines, [41–60] teachers.
+    Hook: conv5_x → (N, 8192) for ResNet-18, (N, 32768) for ResNet-152.
     """
-    proj_list = []
-    for i, pi in enumerate(tqdm(pi_matrices, desc="PCA")):
-        pca = PCA(n_components=n_components, svd_solver="randomized", random_state=42)
-        proj = torch.from_numpy(pca.fit_transform(pi.numpy())).float()
-        proj_list.append(proj.unsqueeze(0))
-    return torch.cat(proj_list, dim=0)   # (M, N, 50)
+    PI_matrices = {}
+    for model_id in tqdm(range(1, 61), desc="Activations"):
+        if model_id <= 20:
+            model = resnet18().to(device)
+            model.load_state_dict(torch.load(f'{CKPT_DIR}/KDmodels/kd{model_id}.pth', weights_only=True))
+        elif model_id <= 40:
+            student_id = model_id - 20
+            model = resnet18().to(device)
+            model.load_state_dict(torch.load(f'{CKPT_DIR}/Basemodels/bm{student_id}.pth', weights_only=True))
+        else:
+            teacher_id = model_id - 40
+            model = resnet152().to(device)
+            model.load_state_dict(torch.load(f'{CKPT_DIR}/Teachers/t{teacher_id}.pth', weights_only=True))
+
+        model.eval()
+        PI_list = []
+
+        def hook_fn(module, input, output):
+            flat_output = torch.flatten(output, 1)  # (batch, D)
+            PI_list.append(flat_output.detach())
+
+        handle = model.conv5_x.register_forward_hook(hook_fn)
+        with torch.no_grad():
+            for images, _ in testloader:
+                model(images.to(device))
+
+        PI_matrix = torch.cat(PI_list, dim=0)  # (N, D)
+        PI_matrices[f'PI_matrix_m{model_id}'] = PI_matrix.cpu()
+        handle.remove()
+        del model
+
+    return PI_matrices
 
 
-# ── Step 3: Cross-model correlation tensor ────────────────────────────────
-def compute_corr(proj_tensor):
+def make_PI_with_hook_cd(testloader, device):
     """
-    proj_tensor: (M, N, K)
-    Returns Λ: (M, M, K, K)
+    40 models: [1–20] baselines, [21–40] CD models.
+    Hook: avg_pool → (N, 512) for ResNet-18.
     """
-    mean = proj_tensor.mean(dim=1, keepdim=True)
-    std  = proj_tensor.std(dim=1, keepdim=True).clamp(min=1e-8)
-    z = (proj_tensor - mean) / std                  # (M, N, K)
-    z = z.permute(0, 2, 1)                          # (M, K, N)
-    corr = torch.einsum("mkn,pqn->mpkq", z, z) / proj_tensor.shape[1]
-    return corr
+    PI_matrices = {}
+    for model_id in tqdm(range(1, 41), desc="Activations"):
+        model = resnet18().to(device)
+        if model_id <= 20:
+            model.load_state_dict(torch.load(f'{CKPT_DIR}/Basemodels/bm{model_id}.pth', weights_only=True))
+        else:
+            model.load_state_dict(torch.load(f'{CKPT_DIR}/CDmodels/cd{model_id - 20}.pth', weights_only=True))
+
+        model.eval()
+        PI_list = []
+
+        def hook_fn(module, input, output):
+            flat_output = torch.flatten(output, 1)  # (batch, 512)
+            PI_list.append(flat_output.detach())
+
+        handle = model.avg_pool.register_forward_hook(hook_fn)
+        with torch.no_grad():
+            for images, _ in testloader:
+                model(images.to(device))
+
+        PI_matrix = torch.cat(PI_list, dim=0)  # (N, 512)
+        PI_matrices[f'PI_matrix_m{model_id}'] = PI_matrix.cpu()
+        handle.remove()
+        del model
+
+    return PI_matrices
 
 
-# ── Step 4: Greedy cross-model clustering (Algorithm 1) ───────────────────
-def cluster_features(corr_tensor, gamma):
+# ══ Step 2 ── PCA(50) per model ═══════════════════════════════════════════
+# Notebook 1 Cell 30 (KD):  sklearn PCA — randomized SVD with mean centering
+# Notebook 2 Cell 19 (CD):  torch.svd   — no mean centering
+#
+# The two notebooks use different PCA methods; both reduce to (N, 50).
+# Returns PI_proj_tensor: (M, N, 50) CPU tensor.
+
+def make_PI_proj_kd(PI_matrices, num_models):
+    """Notebook 1 Cell 30: sklearn PCA(50, randomized, seed=42) with mean centering."""
+    PI_proj_list = []
+    for model_id in tqdm(range(1, num_models + 1), desc="PCA"):
+        PI_matrix = PI_matrices[f'PI_matrix_m{model_id}']   # (N, D)
+        PI_numpy = PI_matrix.detach().cpu().numpy()
+        pca = PCA(n_components=50, svd_solver='randomized', random_state=42)
+        PI_proj_numpy = pca.fit_transform(PI_numpy)          # (N, 50)
+        PI_proj = torch.from_numpy(PI_proj_numpy).float()
+        PI_proj_list.append(PI_proj.unsqueeze(0))
+        print(f"Model {model_id}: PI_proj shape = {PI_proj.shape}")
+
+    PI_proj_tensor = torch.cat(PI_proj_list, dim=0)          # (M, N, 50)
+    print(f"PI_proj_tensor = {PI_proj_tensor.shape}")
+    return PI_proj_tensor
+
+
+def make_PI_proj_cd(PI_matrices, num_models):
+    """Notebook 2 Cell 19: manual torch.svd without mean centering."""
+    PI_proj_list = []
+    for model_id in tqdm(range(1, num_models + 1), desc="SVD"):
+        PI_matrix = PI_matrices[f'PI_matrix_m{model_id}']   # (N, D)
+        _, S, V = torch.svd(PI_matrix)
+        sorted_indices = torch.argsort(S, descending=True)
+        V_sorted = V[:, sorted_indices]
+        V_pca50 = V_sorted[:, :50]                           # (D, 50)
+        PI_proj = PI_matrix @ V_pca50                        # (N, 50)
+        PI_proj_list.append(PI_proj.unsqueeze(0))
+        print(f"Model {model_id}: PI_proj shape = {PI_proj.shape}")
+
+    PI_proj_tensor = torch.cat(PI_proj_list, dim=0)          # (M, N, 50)
+    print(f"PI_proj_tensor = {PI_proj_tensor.shape}")
+    return PI_proj_tensor
+
+
+# ══ Step 3 ── Cross-model correlation tensor ══════════════════════════════
+# Notebook 1 Cell 32, Notebook 2 Cell 20: compute_corr
+
+def compute_corr(proj_matrix):
     """
-    corr_tensor: (M, M, K, K) absolute correlations
-    gamma: scalar threshold
+    proj_matrix: (M, N, K)
+    Returns corr_tensor Λ: (M, M, K, K)
+    """
+    mean = torch.mean(proj_matrix, dim=1, keepdim=True)
+    std  = torch.std(proj_matrix, dim=1, keepdim=True)
+    proj_normalized = (proj_matrix - mean) / std           # (M, N, K)
+    proj_reshape = proj_normalized.permute(0, 2, 1)        # (M, K, N)
+    corr_tensor = torch.einsum('mkn,pqn->mpkq', proj_reshape, proj_reshape) / proj_matrix.shape[1]
+    return corr_tensor
+
+
+# Notebook 1 Cell 33, Notebook 2 Cell 20: get_gamma_corr
+
+def get_gamma_corr(corr_tensor, percentile=99):
+    corr_abs = torch.abs(corr_tensor)
+    gamma_corr = torch.quantile(corr_abs, percentile / 100.0)
+    print(gamma_corr)
+    return gamma_corr
+
+
+# ══ Step 4 ── Greedy cross-model clustering (Algorithm 1) ════════════════
+# Notebook 1 Cell 34, Notebook 2 Cell 21: cluster_features
+#
+# Note on `maximum` dtype: both notebooks use dtype=torch.int32, which
+# truncates float correlations to integers (0 for any value in [0, 1)).
+# This means the "maximum seen" tracking degrades after the first assignment:
+# once maximum[p,q] is set to 0, any corr > gamma (which is > 0) satisfies
+# the > maximum condition. In practice the gamma threshold becomes the sole
+# gate. Kept as-is for exact reproducibility with the pre-computed tensors.
+
+def cluster_features(corr_tensor, gamma_corr):
+    """
+    corr_tensor: (M, M, K, K)
+    gamma_corr:  scalar threshold (γ, 99th-percentile of |Λ|)
     Returns assignment: (M, K) with cluster IDs 1..T
     """
-    corr_abs = corr_tensor.abs()
-    M, _, K, _ = corr_abs.shape
-    assignment = torch.zeros(M, K, dtype=torch.long)
-    maximum    = torch.full((M, K), -1.0)
-    cluster_id = 1
+    corr_tensor = torch.abs(corr_tensor)
+    M, _, K, _ = corr_tensor.shape
+    assignment = torch.zeros((M, K))
+    maximum = torch.full((M, K), -1.0, dtype=torch.int32)
+    currentFeature = 1
 
     for i in tqdm(range(M), desc="Clustering"):
         for j in range(K):
             if assignment[i, j] != 0:
                 continue
-            assignment[i, j] = cluster_id
+            assignment[i, j] = currentFeature
             for p in range(M):
-                row = corr_abs[i, p, j, :]          # (K,)
+                CorrMat = corr_tensor[i, p, :, :]
+                FeatureRow = CorrMat[j, :]
                 for q in range(K):
-                    if row[q] > maximum[p, q] and row[q] > gamma:
-                        assignment[p, q] = cluster_id
-                        maximum[p, q]    = row[q]
-            cluster_id += 1
+                    if (FeatureRow[q] > maximum[p, q]) & (FeatureRow[q] > gamma_corr):
+                        assignment[p, q] = currentFeature
+                        maximum[p, q] = FeatureRow[q]
+            currentFeature += 1
 
-    n_clusters = torch.unique(assignment).numel()
-    print(f"Clusters: {n_clusters}")
+    cluster_num = torch.unique(assignment.flatten())
+    assert len(cluster_num) == torch.max(cluster_num)
+    print(f'Num of clusters: {len(cluster_num)}')
     return assignment
 
 
-# ── Step 5: Threshold activations → binary mask ───────────────────────────
-def compute_data_feature(proj_tensor, threshold=0.9):
+# ══ Step 5 ── Threshold activations → binary mask ════════════════════════
+# Notebook 1 Cell 35, Notebook 2 Cell 22: compute_data_feature
+
+def compute_data_feature(proj_matrix, data_threshold=0.9):
     """
-    proj_tensor: (M, N, K)
-    Returns binary tensor (M, N, K).
+    proj_matrix: (M, N, K)
+    Returns data_feature: (M, N, K) bool tensor.
     """
-    norm = proj_tensor.norm(p=float("inf"), dim=1, keepdim=True).clamp(min=1e-8)
-    normalized = proj_tensor / norm
-    r = torch.quantile(normalized.reshape(normalized.shape[0], -1), threshold, dim=1)
-    return (normalized > r[:, None, None]).int()
-
-
-# ── Step 6: Assemble Ω ────────────────────────────────────────────────────
-def compute_interaction_tensor(assignment, data_feature):
-    """
-    assignment:   (M, K) — cluster IDs 1..T  (CPU)
-    data_feature: (M, N, K) — binary          (CPU)
-    Returns Ω: (M, N, T) binary int tensor.
-    """
-    M, N, K = data_feature.shape
-    T = int(assignment.max().item())
-    it = torch.zeros(M, N, T, dtype=torch.int32)
-    idx = (assignment - 1).long()   # 0-indexed
-
-    for t in tqdm(range(T), desc="Assembling IT"):
-        mask = (idx == t).unsqueeze(1)              # (M, 1, K)
-        it[:, :, t] = (mask * data_feature).sum(dim=2).bool().int()
-
-    return it
-
-
-# ── KD tensor pipeline ────────────────────────────────────────────────────
-def build_kd_tensor(testloader, device):
-    """
-    60 models on the same feature axis (conv5_x):
-      [0:20]  = KD students  (ResNet-18, checkpoints/KDmodels/kd{i}.pth)
-      [20:40] = Baselines    (ResNet-18, checkpoints/Basemodels/bm{i}.pth)
-      [40:60] = Teachers     (ResNet-152, checkpoints/Teachers/t{i}.pth)
-    """
-    pi_matrices = []
-
-    configs = (
-        [(f"{CKPT_DIR}/KDmodels/kd{i}.pth",   resnet18,  "conv5_x") for i in range(1, 21)] +
-        [(f"{CKPT_DIR}/Basemodels/bm{i}.pth",  resnet18,  "conv5_x") for i in range(1, 21)] +
-        [(f"{CKPT_DIR}/Teachers/t{i}.pth",     resnet152, "conv5_x") for i in range(1, 21)]
+    proj_matrix_norm = torch.norm(proj_matrix, p=float('inf'), dim=1, keepdim=True)
+    normalized_proj_matrix = proj_matrix / proj_matrix_norm
+    r_data = torch.quantile(
+        normalized_proj_matrix.view(normalized_proj_matrix.shape[0], -1),
+        data_threshold, dim=1,
     )
-
-    for ckpt_path, model_fn, layer_name in tqdm(configs, desc="Collecting activations"):
-        model = model_fn().to(device)
-        model.load_state_dict(torch.load(ckpt_path, weights_only=True))
-        hook_layer = getattr(model, layer_name)
-        pi = collect_activations(model, hook_layer, testloader, device)
-        pi_matrices.append(pi.cpu())
-        del model
-
-    return pi_matrices
+    data_feature = normalized_proj_matrix > r_data[:, None, None]
+    return data_feature
 
 
-# ── CD tensor pipeline ────────────────────────────────────────────────────
-def build_cd_tensor(testloader, device):
+# ══ Step 6 ── Assemble Ω ═════════════════════════════════════════════════
+# Notebook 1 Cell 36, Notebook 2 Cell 23: compute_interaction_tensor
+
+def compute_interaction_tensor(assign_mat, data_feature):
     """
-    40 models (avg_pool output, i.e., post-conv5_x):
-      [0:20]  = Baselines  (ResNet-18, checkpoints/Basemodels/bm{i}.pth)
-      [20:40] = CD models  (ResNet-18, checkpoints/CDmodels/cd{i}.pth)
+    assign_mat:   (M, K) — cluster IDs 1..T
+    data_feature: (M, N, K) — bool
+    Returns interaction_tensor Ω: (M, N, T) int32
     """
-    pi_matrices = []
+    M = data_feature.shape[0]
+    N = data_feature.shape[1]
+    T = len(torch.unique(assign_mat.flatten()))
 
-    configs = (
-        [(f"{CKPT_DIR}/Basemodels/bm{i}.pth", "avg_pool") for i in range(1, 21)] +
-        [(f"{CKPT_DIR}/CDmodels/cd{i}.pth",   "avg_pool") for i in range(1, 21)]
-    )
+    interaction_tensor = torch.zeros((M, N, T), dtype=torch.int64)
+    assign_mask = assign_mat - 1   # 0-indexed
 
-    for ckpt_path, layer_name in tqdm(configs, desc="Collecting activations"):
-        model = resnet18().to(device)
-        model.load_state_dict(torch.load(ckpt_path, weights_only=True))
-        hook_layer = getattr(model, layer_name)
-        pi = collect_activations(model, hook_layer, testloader, device)
-        pi_matrices.append(pi.cpu())
-        del model
+    for t in tqdm(range(interaction_tensor.shape[2]), desc="Assembling IT"):
+        mask = (assign_mask == t).unsqueeze(1)
+        interaction_tensor[:, :, t] = torch.sum(mask * data_feature, dim=2)
 
-    return pi_matrices
+    interaction_tensor = interaction_tensor.bool().int()
+    return interaction_tensor
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
+# Notebook 1 Cell 37, Notebook 2 Cell 24: main pipeline
+
 def main():
     parser = argparse.ArgumentParser(description="Build Interaction Tensor (Section 3.2)")
     parser.add_argument("--target", required=True, choices=["kd", "cd"],
-                        help="kd: KD-student/baseline/teacher tensor  |  cd: baseline/CD-model tensor")
-    parser.add_argument("--data-dir", default=str(DATA_DIR))
-    parser.add_argument("--pca-components", type=int, default=50)
+                        help="kd: KD-student/baseline/teacher  |  cd: baseline/CD-model")
+    parser.add_argument("--data-dir",        default=str(DATA_DIR))
     parser.add_argument("--corr-percentile", type=float, default=99.0,
-                        help="Percentile of |correlation| used as clustering threshold γ")
-    parser.add_argument("--data-threshold", type=float, default=0.9,
-                        help="Per-model activation percentile for binary thresholding")
+                        help="Percentile for γ (clustering threshold)")
+    parser.add_argument("--data-threshold",  type=float, default=0.9,
+                        help="Per-model activation threshold for binary mask")
     args = parser.parse_args()
 
     IT_DIR.mkdir(parents=True, exist_ok=True)
@@ -319,42 +393,33 @@ def main():
 
     testloader = make_testloader(args.data_dir)
 
-    # Step 1 — collect activations
+    # Step 1 + 2 — activations + PCA
     if args.target == "kd":
-        pi_matrices = build_kd_tensor(testloader, device)
+        PI_matrices    = make_PI_with_hook_kd(testloader, device)     # Cell 28
+        PI_proj_tensor = make_PI_proj_kd(PI_matrices, num_models=60)  # Cell 30
         out_path = IT_DIR / "interaction_tensor_KD_models_20teacher.pt"
     else:
-        pi_matrices = build_cd_tensor(testloader, device)
+        PI_matrices    = make_PI_with_hook_cd(testloader, device)     # Cell 18
+        PI_proj_tensor = make_PI_proj_cd(PI_matrices, num_models=40)  # Cell 19
         out_path = IT_DIR / "interaction_tensor_B_SCD_model.pt"
 
-    # Step 2 — PCA(50)
-    print(f"\nProjecting {len(pi_matrices)} models to {args.pca_components} PCA components …")
-    proj_tensor = pca_project(pi_matrices, n_components=args.pca_components)
-    print(f"proj_tensor: {proj_tensor.shape}")   # (M, N, 50)
+    # Step 3 — correlation + threshold (Cell 32-33 / Cell 20)
+    corr_tensor = compute_corr(PI_proj_tensor)
+    print(corr_tensor.shape)
+    gamma_corr = get_gamma_corr(corr_tensor, args.corr_percentile)
 
-    # Step 3 — correlation
-    print("\nComputing cross-model correlation tensor …")
-    corr_tensor = compute_corr(proj_tensor)
-    print(f"corr_tensor: {corr_tensor.shape}")   # (M, M, 50, 50)
+    # Step 4 — clustering (Cell 34 / Cell 21)
+    assignment = cluster_features(corr_tensor, gamma_corr)
+    print(assignment.shape)
 
-    # Step 4 — clustering
-    gamma = torch.quantile(corr_tensor.abs(), args.corr_percentile / 100.0).item()
-    print(f"γ (p{args.corr_percentile:.0f}): {gamma:.4f}")
-    assignment = cluster_features(corr_tensor, gamma)
-    print(f"assignment: {assignment.shape}")     # (M, 50)
+    # Step 5 — binary mask (Cell 35 / Cell 22)
+    data_feature = compute_data_feature(PI_proj_tensor, args.data_threshold)
+    print(data_feature.shape)
 
-    # Step 5 — threshold
-    print("\nThresholding activations …")
-    data_feature = compute_data_feature(proj_tensor, threshold=args.data_threshold)
-    print(f"data_feature: {data_feature.shape}") # (M, N, 50)
-
-    # Step 6 — assemble Ω
-    print("\nAssembling interaction tensor …")
-    omega = compute_interaction_tensor(assignment, data_feature)
-    print(f"Ω shape: {omega.shape}")             # (M, N, T)
-
-    # Save
-    torch.save(omega, out_path)
+    # Step 6 — assemble Ω (Cell 36 / Cell 23)
+    interaction_tensor = compute_interaction_tensor(assignment, data_feature)
+    torch.save(interaction_tensor, out_path)
+    print(interaction_tensor.shape)
     print(f"\nSaved → {out_path}")
 
 
