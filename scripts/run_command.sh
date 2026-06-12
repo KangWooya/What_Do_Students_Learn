@@ -1,170 +1,130 @@
 #!/bin/bash
-# Linux 환경 학습 명령어 (원본: run_command.txt, Windows PowerShell 기준)
-# 작업 디렉토리: 각 명령의 cd 참고
-# 데이터 경로: /home/seungu/mycode/Data
+# Training commands for all methods × architectures (CIFAR-100)
+#
+# Run from the repository root:
+#   bash scripts/run_command.sh
+#
+# Or copy individual sections and run manually.
+#
+# DATA_DIR: set to your CIFAR-100 root (default: data/)
 
-BASE=/home/seungu/mycode/WDSL/Confusion_distillation
-DATA=/home/seungu/mycode/Data
+set -e
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATA_DIR="${DATA_DIR:-data/}"
 
-# ============================================================
-# Baseline ResNet-18 (pytorch-cifar100)
-# ============================================================
-cd "$BASE/pytorch-cifar100"
-python train.py -net resnet18 -gpu
+TRAIN="$REPO_ROOT/training"
+CSKD="$REPO_ROOT/baselines/cs-kd"
+PSKD="$REPO_ROOT/baselines/ps-kd"
 
-# ============================================================
-# Teacher ResNet-152 x 20회 순차 학습
-# ============================================================
-cd "$BASE/pytorch-cifar100"
-for i in $(seq 1 20); do
-    echo "===== Run $i / 20 ====="
-    python train.py -net resnet152 -gpu
-done
+# ──────────────────────────────────────────────────────────────
+# Baseline (200 epoch)
+# conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
+# ──────────────────────────────────────────────────────────────
+cd "$TRAIN"
+uv run python train.py -net resnet18
+uv run python train.py -net resnet34
+uv run python train.py -net resnet50
+uv run python train.py -net densenet121
 
-# ============================================================
-# Confusion Distillation (CD) - ResNet-18, 300epoch
-# 전환 epoch 비율: 3:3:6:3:15 = 30 30 60 30 150 (300 epoch 기준)
-# ============================================================
-cd "$BASE/pytorch-cifar100"
-python train_cd.py \
+# ──────────────────────────────────────────────────────────────
+# Knowledge Distillation — ResNet-18 student, ResNet-152 teacher
+# conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
+# ──────────────────────────────────────────────────────────────
+cd "$TRAIN"
+uv run python train_kd.py \
     -net resnet18 \
-    -gpu \
-    -b 128 \
-    --confkd \
-    --T 2.0 \
-    --soft_w 0.7 \
-    --ce_w 0.3 \
-    --smoothing 0.1 \
-    --transition_epoch "30 30 60 30 150" \
-    --ema 0.9
+    --teacher resnet152 \
+    --teacher_weights <path-to-resnet152-best.pth> \
+    --temp 2.0 --alpha 0.85
 
-# ============================================================
-# CS-KD - ResNet-18 (200 epoch)
-# ============================================================
-cd "$BASE/cs-kd"
-python train.py \
-    --sgpu 0 \
-    --lr 0.1 \
-    --epoch 200 \
-    --model CIFAR_ResNet18 \
-    --name test_cifar \
-    --decay 1e-4 \
-    --dataset cifar100 \
-    --dataroot "$DATA" \
-    -cls \
-    --lamda 1
+# ──────────────────────────────────────────────────────────────
+# Confusion Distillation — 200 epoch
+# Phase schedule 3:3:3:3:8 × (200/20 = 10) → 30 30 30 30 80
+# conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
+# ──────────────────────────────────────────────────────────────
+cd "$TRAIN"
+uv run python train_cd.py -net resnet18 \
+    --transition_epoch 30 30 30 30 80 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# CS-KD - ResNet-34
-python train.py \
-    --sgpu 0 \
-    --lr 0.1 \
-    --epoch 200 \
-    --model CIFAR_ResNet34 \
-    --name test_cifar \
-    --decay 1e-4 \
-    --dataset cifar100 \
-    --dataroot "$DATA" \
-    -cls \
-    --lamda 1
+uv run python train_cd.py -net resnet34 \
+    --transition_epoch 30 30 30 30 80 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# CS-KD - ResNet-50
-python train.py \
-    --sgpu 0 \
-    --lr 0.1 \
-    --epoch 200 \
-    --model CIFAR_ResNet50 \
-    --name test_cifar \
-    --decay 1e-4 \
-    --dataset cifar100 \
-    --dataroot "$DATA" \
-    -cls \
-    --lamda 1
+uv run python train_cd.py -net resnet50 \
+    --transition_epoch 30 30 30 30 80 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# ============================================================
-# PS-KD - ResNet-18
-# ============================================================
-cd "$BASE/PS-KD-Pytorch"
-CUDA_VISIBLE_DEVICES=0 python main.py \
-    --lr 0.1 \
-    --lr_decay_schedule 150 225 \
-    --PSKD \
-    --experiments_dir ./runs/pskd_resnet18_cifar100 \
-    --batch_size 128 \
-    --classifier_type ResNet18 \
-    --data_path "$DATA" \
-    --data_type cifar100 \
-    --alpha_T 0.8 \
-    --workers 4
+uv run python train_cd.py -net densenet121 \
+    --transition_epoch 30 30 30 30 80 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# PS-KD - ResNet-34
-CUDA_VISIBLE_DEVICES=0 python main.py \
-    --lr 0.1 \
-    --lr_decay_schedule 150 225 \
-    --PSKD \
-    --experiments_dir ./runs/pskd_resnet34_cifar100 \
-    --batch_size 128 \
-    --classifier_type ResNet34 \
-    --data_path "$DATA" \
-    --data_type cifar100 \
-    --alpha_T 0.8 \
-    --workers 4
+# ──────────────────────────────────────────────────────────────
+# Confusion Distillation — 300 epoch (best config, Table 1)
+# Phase schedule 3:3:6:3:15 × (300/30 = 10) → 30 30 60 30 150
+# conf/global_settings.py: EPOCH=300, MILESTONES=[90,180,240]
+# ──────────────────────────────────────────────────────────────
+cd "$TRAIN"
+uv run python train_cd.py -net resnet18 \
+    --transition_epoch 30 30 60 30 150 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# ============================================================
-# [카메라 레디] DenseNet-121 on CIFAR-100
-# ============================================================
+uv run python train_cd.py -net resnet34 \
+    --transition_epoch 30 30 60 30 150 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# Baseline DenseNet-121
-cd "$BASE/pytorch-cifar100"
-python train.py -net densenet121 -gpu
+uv run python train_cd.py -net resnet50 \
+    --transition_epoch 30 30 60 30 150 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# CD DenseNet-121
-python train_cd.py \
-    -net densenet121 \
-    -gpu \
-    -b 128 \
-    --confkd \
-    --T 2.0 \
-    --soft_w 0.7 \
-    --ce_w 0.3 \
-    --smoothing 0.1 \
-    --transition_epoch "30 30 60 30 150" \
-    --ema 0.9
+uv run python train_cd.py -net densenet121 \
+    --transition_epoch 30 30 60 30 150 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 
-# CS-KD DenseNet-121
-cd "$BASE/cs-kd"
-python train.py \
-    --sgpu 0 \
-    --lr 0.1 \
-    --epoch 200 \
-    --model CIFAR_DenseNet121 \
-    --name test_cifar \
-    --decay 1e-4 \
-    --dataset cifar100 \
-    --dataroot "$DATA" \
-    -cls \
-    --lamda 1
+# ──────────────────────────────────────────────────────────────
+# CS-KD (200 epoch)
+# ──────────────────────────────────────────────────────────────
+cd "$CSKD"
+uv run python train.py --dataset cifar100 --model CIFAR_ResNet18 \
+    --dataroot "$DATA_DIR" --sgpu 0 --lr 0.1 --epoch 200 \
+    --name run1 --decay 1e-4 -cls --lamda 1
 
-# PS-KD DenseNet-121
-cd "$BASE/PS-KD-Pytorch"
-CUDA_VISIBLE_DEVICES=0 python main.py \
-    --lr 0.1 \
-    --lr_decay_schedule 150 225 \
-    --PSKD \
-    --experiments_dir ./runs/pskd_densenet121_cifar100 \
-    --batch_size 128 \
-    --classifier_type DenseNet121 \
-    --data_path "$DATA" \
-    --data_type cifar100 \
-    --alpha_T 0.8 \
-    --workers 4
+uv run python train.py --dataset cifar100 --model CIFAR_ResNet34 \
+    --dataroot "$DATA_DIR" --sgpu 0 --lr 0.1 --epoch 200 \
+    --name run1 --decay 1e-4 -cls --lamda 1
 
-# PS-KD - ResNet-18 resume (기존 체크포인트 이어서 학습)
-CUDA_VISIBLE_DEVICES=0 python main.py \
-    --data_type cifar100 \
-    --data_path "$DATA" \
-    --classifier_type ResNet18 \
-    --batch_size 128 \
+uv run python train.py --dataset cifar100 --model CIFAR_ResNet50 \
+    --dataroot "$DATA_DIR" --sgpu 0 --lr 0.1 --epoch 200 \
+    --name run1 --decay 1e-4 -cls --lamda 1
+
+uv run python train.py --dataset cifar100 --model CIFAR_DenseNet121 \
+    --dataroot "$DATA_DIR" --sgpu 0 --lr 0.1 --epoch 200 \
+    --name run1 --decay 1e-4 -cls --lamda 1
+
+# ──────────────────────────────────────────────────────────────
+# PS-KD (300 epoch, lr decay at 150 and 225)
+# ──────────────────────────────────────────────────────────────
+cd "$PSKD"
+uv run python main.py --data_type cifar100 --data_path "$DATA_DIR" \
+    --classifier_type ResNet18 --batch_size 128 \
     --lr 0.1 --lr_decay_schedule 150 225 \
-    --PSKD --alpha_T 0.8 \
-    --experiments_dir ./runs/pskd_resnet34_cifar100 \
-    --resume "$BASE/PS-KD-Pytorch/runs/pskd_resnet18_cifar100/cifar100_ResNet18_PSKD_True_2025-9-4-15-59-56/model/checkpoint_best.pth"
+    --PSKD --alpha_T 0.8 --workers 4 \
+    --experiments_dir ./runs/pskd_resnet18_cifar100
+
+uv run python main.py --data_type cifar100 --data_path "$DATA_DIR" \
+    --classifier_type ResNet34 --batch_size 128 \
+    --lr 0.1 --lr_decay_schedule 150 225 \
+    --PSKD --alpha_T 0.8 --workers 4 \
+    --experiments_dir ./runs/pskd_resnet34_cifar100
+
+uv run python main.py --data_type cifar100 --data_path "$DATA_DIR" \
+    --classifier_type ResNet50 --batch_size 128 \
+    --lr 0.1 --lr_decay_schedule 150 225 \
+    --PSKD --alpha_T 0.8 --workers 4 \
+    --experiments_dir ./runs/pskd_resnet50_cifar100
+
+uv run python main.py --data_type cifar100 --data_path "$DATA_DIR" \
+    --classifier_type DenseNet121 --batch_size 128 \
+    --lr 0.1 --lr_decay_schedule 150 225 \
+    --PSKD --alpha_T 0.8 --workers 4 \
+    --experiments_dir ./runs/pskd_densenet121_cifar100
