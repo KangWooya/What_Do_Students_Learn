@@ -71,7 +71,7 @@ uv sync          # Creates .venv and installs all dependencies
 pip install huggingface-hub
 python -c "
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id='seungu/WDSL-tensors',
+snapshot_download(repo_id='KangWooya/WDSL-tensors',
                   local_dir='interaction_tensors/')
 "
 ```
