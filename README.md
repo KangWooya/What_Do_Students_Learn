@@ -137,8 +137,6 @@ uv run python analysis/evaluate_models.py --data-dir data/
 
 Fill in the checkpoint paths at the top of each method block in [analysis/evaluate_models.py](analysis/evaluate_models.py). Empty lists are skipped with a `(skipped)` message.
 
-> **Note**: DenseNet-121 CD-200 checkpoints are not available in this release; all other rows in Table 2 are reproducible.
-
 ---
 
 ## Reproducing Training
