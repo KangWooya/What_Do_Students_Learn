@@ -235,18 +235,30 @@ uv run python main.py --data_type cifar100 --data_path /path/to/data \
 
 ## Interaction Tensor Construction
 
-To recompute IT tensors from trained checkpoints:
+To recompute IT tensors from trained checkpoints, use the standalone script:
 
+```bash
+# KD tensor  (20 KD students + 20 baselines + 20 teachers  →  shape [60, N, T])
+# Requires: checkpoints/KDmodels/kd{1..20}.pth
+#           checkpoints/Basemodels/bm{1..20}.pth
+#           checkpoints/Teachers/t{1..20}.pth
+uv run python analysis/build_tensors.py --target kd --data-dir data/
+
+# CD tensor  (20 baselines + 20 CD models  →  shape [40, N, T])
+# Requires: checkpoints/Basemodels/bm{1..20}.pth
+#           checkpoints/CDmodels/cd{1..20}.pth
+uv run python analysis/build_tensors.py --target cd --data-dir data/
 ```
-1. Train 20 independent baseline models + 20 KD student models + 20 teacher models
-2. Open analysis/1_kd_analysis.ipynb — run cells that compute the IT:
-   - Hook conv5_x layer activations
-   - PCA(50) per model
-   - Greedy cross-model correlation clustering (Algorithm 1 in paper)
-   - Threshold → binary Ω ∈ {0,1}^{M×N×T}
-   - Saves interaction_tensor_KD_models_20teacher.pt
-3. For the CD tensor, open analysis/2_cd_it_analysis.ipynb
-```
+
+The script implements the full pipeline from Section 3.2:
+1. Hook intermediate-layer activations (conv5_x for KD, avg_pool for CD)
+2. PCA(50) per model
+3. Cross-model correlation tensor Λ
+4. Greedy clustering (Algorithm 1) with 99th-percentile threshold γ
+5. L∞-normalize and threshold activations → binary (M, N, K)
+6. Aggregate by cluster → Ω ∈ {0,1}^(M×N×T)
+
+The source notebooks (`analysis/1_kd_analysis.ipynb`, `analysis/2_cd_it_analysis.ipynb`) contain additional exploratory analysis and visualization cells.
 
 ---
 
