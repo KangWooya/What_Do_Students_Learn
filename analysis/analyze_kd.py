@@ -216,7 +216,7 @@ def get_confidence(interaction_tensor, model_name, testloader, device):
                 images = images.to(device)
                 logits = model(images)
                 probs = F.softmax(logits, dim=1)
-                conf = probs[torch.arange(probs.size(0)), labels]
+                conf = probs[torch.arange(probs.size(0), device=device), labels.to(device)]
                 conf_list.append(conf.squeeze().detach())
         conf_mat.append(torch.cat(conf_list))
 

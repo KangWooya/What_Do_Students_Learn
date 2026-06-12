@@ -15,7 +15,7 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-datapath = "/home/seungu/mycode/Data"
+datapath = "data/"
 
 def get_network(args):
     """ return given network

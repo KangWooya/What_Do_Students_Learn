@@ -245,6 +245,13 @@ def main():
     parser.add_argument("--out-dir",       default=None)
     args = parser.parse_args()
 
+    if not args.teacher_ckpt or not args.baseline_ckpt:
+        parser.error(
+            "Checkpoint paths are required.\n"
+            "  --teacher-ckpt  path to ResNet-152 checkpoint (.pth)\n"
+            "  --baseline-ckpt path to ResNet-18 baseline checkpoint (.pth)"
+        )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
