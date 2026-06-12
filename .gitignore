@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+
+# Large binary files — hosted on HuggingFace
+checkpoints/
+interaction_tensors/
+
+# Jupyter notebooks (kept private)
+analysis/*.ipynb
+
+# Dataset (downloaded automatically)
+data/
+*/data/
+
+# Training logs and outputs
+training/checkpoint/
+training/runs/
+baselines/cs-kd/results/
+baselines/cs-kd/save_results/
+baselines/ps-kd/runs/
+
+# Figure output
+figures/
+
+# Claude Code local settings
+.claude/
+
+# Misc
+.DS_Store
+*.log

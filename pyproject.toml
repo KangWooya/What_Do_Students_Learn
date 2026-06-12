@@ -1,0 +1,31 @@
+[project]
+name = "wdsl"
+version = "0.1.0"
+description = "What Do Students Learn? A Feature-Level Analysis of Dark Knowledge"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "numpy>=2.0",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    "pandas>=2.0",
+    "scipy>=1.13",
+    "scikit-learn>=1.4",
+    "tqdm>=4.66",
+    "ipykernel>=6.29",
+    "pillow>=10.0",
+    "tensorboard>=2.17",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
