@@ -150,41 +150,85 @@ cd training/
 uv run python train.py -net resnet18      # or resnet34, resnet50, densenet121
 ```
 
+The epoch count and LR milestones are set in [training/conf/global_settings.py](training/conf/global_settings.py):
+
+```python
+EPOCH = 200
+MILESTONES = [60, 120, 160]
+```
+
 ### Knowledge Distillation (Section 3)
 
 ```bash
 cd training/
 uv run python train_kd.py -net resnet18 \
-    --teacher_net resnet152 \
-    --teacher_weights <path-to-teacher.pth> \
-    --temperature 2 --alpha 0.85
+    --teacher resnet152 \
+    --teacher_weights <path-to-resnet152-best.pth> \
+    --temp 2.0 --alpha 0.85
 ```
 
-### Confusion Distillation (Section 4, best config)
+### Confusion Distillation (Section 4)
+
+CD alternates between hard-target (CE only) and soft-target (confusion + CE) phases. The `--transition_epoch` argument specifies the absolute epoch at which each phase boundary occurs.
+
+**Phase schedule for 200 epochs** — ratio 3:3:3:3:8, boundaries at every 10 epochs:
+
+```
+Epoch   0– 30  Hard
+Epoch  30– 60  Soft
+Epoch  60– 90  Hard
+Epoch  90–120  Soft
+Epoch 120–200  Hard (stable)
+```
 
 ```bash
+# conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
+cd training/
+uv run python train_cd.py -net resnet18 \
+    --transition_epoch 30 30 30 30 80 \
+    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+```
+
+**Phase schedule for 300 epochs** — ratio 3:3:6:3:15, boundaries at every 10 epochs (best config, Table 1):
+
+```
+Epoch   0– 30  Hard
+Epoch  30– 60  Soft
+Epoch  60–120  Hard
+Epoch 120–150  Soft
+Epoch 150–300  Hard (stable)
+```
+
+```bash
+# conf/global_settings.py: EPOCH=300, MILESTONES=[90,180,240]
 cd training/
 uv run python train_cd.py -net resnet18 \
     --transition_epoch 30 30 60 30 150 \
     --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 ```
 
-See [scripts/run_command.sh](scripts/run_command.sh) for commands for all architectures (ResNet-34/50, DenseNet-121).
+Replace `-net resnet18` with `resnet34`, `resnet50`, or `densenet121` as needed. See [scripts/run_command.sh](scripts/run_command.sh) for all architectures.
 
 ### CS-KD Baseline
 
 ```bash
 cd baselines/cs-kd/
 uv run python train.py --dataset cifar100 --model CIFAR_ResNet18 \
-    --data-dir /path/to/data
+    --dataroot /path/to/data --sgpu 0 --lr 0.1 --epoch 200 \
+    --name run1 --decay 1e-4 -cls --lamda 1
+# model options: CIFAR_ResNet18 / CIFAR_ResNet34 / CIFAR_ResNet50 / CIFAR_DenseNet121
 ```
 
 ### PS-KD Baseline
 
 ```bash
 cd baselines/ps-kd/
-uv run python main.py --dataset cifar100 --classifier_type ResNet18 \
-    --data_path /path/to/data --lr_decay_schedule 150 225
+uv run python main.py --data_type cifar100 --data_path /path/to/data \
+    --classifier_type ResNet18 --batch_size 128 \
+    --lr 0.1 --lr_decay_schedule 150 225 \
+    --PSKD --alpha_T 0.8 --workers 4 \
+    --experiments_dir ./runs/pskd_resnet18_cifar100
+# classifier_type options: ResNet18 / ResNet34 / ResNet50 / DenseNet121
 ```
 
 ---
