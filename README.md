@@ -1,17 +1,19 @@
 # What Do Students Learn? A Feature-Level Analysis of Dark Knowledge
 
 **Seungu Kang, Songkuk Kim** — Yonsei University, Seoul, Republic of Korea  
-*ICPR 2026*
+*Accepted at ICPR 2026 (to appear)* · [arXiv:2606.03052](https://arxiv.org/abs/2606.03052)
 
 ---
 
 ## Overview
 
-We analyze what knowledge distillation (KD) actually transfers at the **feature level** using the Interaction Tensor (IT) framework. Key findings:
+We analyze how Knowledge Distillation (KD) changes student feature representations using the **Interaction Tensor** (IT) framework. Key findings and contributions:
 
-1. **KD as regularization**: KD suppresses low-frequency, sample-specific features and reinforces high-frequency, reusable ones.
-2. **Confusion = Dark Knowledge**: A teacher's confusion matrix encodes the same inter-class similarity structure as its soft targets (Pearson r ≈ 0.87, cosine ≈ 0.78).
-3. **Confusion Distillation (CD)**: A teacher-free self-distillation method using the model's own confusion pattern as dynamic soft targets, outperforming CS-KD and PS-KD on CIFAR-100 by ~1.2%.
+1. **KD as feature-level regularization**: KD prunes low-frequency, sample-specific features and promotes a compact set of highly reusable ones. Student models learn 250 fewer features than baselines (531 → 281) while achieving higher average activation frequencies (1329 → 2121 per feature).
+
+2. **Confusion = Dark Knowledge**: The dataset-level confusion matrix encodes inter-class similarity analogous to the teacher's soft targets (Pearson r ≈ 0.87, cosine ≈ 0.78). The confusion ratio does not replicate fine-grained probability values but captures a coarse inter-class similarity structure.
+
+3. **Confusion Distillation (CD)**: A teacher-free self-distillation method that uses the model's own EMA-smoothed confusion matrix as dynamic soft targets. On ResNet-34 and ResNet-50 for CIFAR-100, CD outperforms CS-KD and PS-KD by ~1.2%.
 
 ---
 
@@ -20,21 +22,19 @@ We analyze what knowledge distillation (KD) actually transfers at the **feature 
 ```
 WDSL/
 ├── analysis/
-│   ├── analyze_kd.py          # Figures 1 & 2 (IT analysis of KD)
-│   ├── analyze_cd.py          # Figure 3 (IT analysis of CD)
-│   ├── analyze_confusion.py   # Section 4.1 (confusion ≈ dark knowledge)
-│   └── evaluate_models.py     # Table 2 (accuracy, mean ± std over 3 runs)
+│   ├── analyze_kd.py          # Figures 1 & 2 — IT analysis of KD (Section 3)
+│   ├── analyze_cd.py          # Figure 3 — IT analysis of CD (Section 4.3)
+│   ├── analyze_confusion.py   # Section 4.1 — Confusion ≈ Dark Knowledge
+│   └── evaluate_models.py     # Table 2 — accuracy, mean ± std over 3 runs
 ├── training/
 │   ├── train.py               # Baseline training
 │   ├── train_cd.py            # Confusion Distillation training
 │   ├── train_kd.py            # Knowledge Distillation training
-│   ├── models/                # ResNet, DenseNet definitions
-│   └── conf/                  # Training configuration
+│   ├── models/                # ResNet, DenseNet definitions (CIFAR-100 variant)
+│   └── conf/global_settings.py
 ├── baselines/
-│   ├── cs-kd/                 # CS-KD (Yun et al., 2020)
-│   └── ps-kd/                 # PS-KD (Kim et al., 2021)
-├── checkpoints/               # Model weights — download from HuggingFace (see below)
-├── interaction_tensors/       # Pre-computed IT tensors — download from HuggingFace
+│   ├── cs-kd/                 # CS-KD (Yun et al., CVPR 2020)
+│   └── ps-kd/                 # PS-KD (Kim et al., ICCV 2021)
 ├── scripts/
 │   └── run_command.sh         # Training command examples
 ├── pyproject.toml
@@ -52,12 +52,12 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management wit
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and set up
-git clone https://github.com/<your-username>/WDSL.git
-cd WDSL
+git clone https://github.com/KangWooya/What_Do_Students_Learn.git
+cd What_Do_Students_Learn
 uv sync          # Creates .venv and installs all dependencies
 ```
 
-**CPU-only environment**: remove the `[[tool.uv.index]]` and `[tool.uv.sources]` blocks from `pyproject.toml` before running `uv sync`. Analysis of pre-computed tensors runs on CPU; model loading in `analyze_kd.py` and `evaluate_models.py` will be slower but functional.
+**CPU-only environment**: remove the `[[tool.uv.index]]` and `[tool.uv.sources]` blocks from `pyproject.toml` before running `uv sync`.
 
 **Other CUDA versions**: replace `cu124` with your version (e.g., `cu118`, `cu126`) in `pyproject.toml`.
 
@@ -65,7 +65,7 @@ uv sync          # Creates .venv and installs all dependencies
 
 ## Data & Pre-computed Tensors
 
-**Interaction Tensor files** (pre-computed, required for Figures 1–3) are hosted on HuggingFace:
+**Interaction Tensor files** (required for Figures 1–3) are hosted on HuggingFace:
 
 ```bash
 pip install huggingface-hub
@@ -81,7 +81,11 @@ snapshot_download(repo_id='KangWooya/WDSL-tensors',
 | `interaction_tensor_KD_models_20teacher.pt` | ~1.8 GB | `analyze_kd.py` (Figs 1 & 2) |
 | `interaction_tensor_B_SCD_model.pt` | ~896 MB | `analyze_cd.py` (Fig 3) |
 
-**Model checkpoints** are not publicly released. Figures 1–3 and their statistics reproduce fully from the pre-computed tensors above. `analyze_confusion.py` and `evaluate_models.py` require locally trained checkpoints.
+Each tensor encodes Ω ∈ {0,1}^{M×N×T} — binary indicator of which model uses which feature on which sample:
+- `interaction_tensor_KD_models_20teacher.pt` shape `[60, 10000, T]`: `[0:20]` = KD students, `[20:40]` = baselines, `[40:60]` = teachers
+- `interaction_tensor_B_SCD_model.pt` shape `[40, 10000, T]`: `[0:20]` = baselines, `[20:40]` = CD models
+
+**Model checkpoints** are not publicly released. Figures 1–3 reproduce fully from the pre-computed tensors. `analyze_confusion.py` and `evaluate_models.py` require locally trained checkpoints (see Training below).
 
 **CIFAR-100** is downloaded automatically on first run. Set `DATA_DIR` at the top of each script to your preferred download location.
 
@@ -91,16 +95,17 @@ snapshot_download(repo_id='KangWooya/WDSL-tensors',
 
 All scripts are run from the repository root with `uv run`.
 
-### Figure 1 & 2 — KD Feature Analysis (Section 3 & 4)
+### Figures 1 & 2 — KD Feature Analysis (Section 3)
 
 ```bash
 uv run python analysis/analyze_kd.py --out-dir figures/
 # Options:
-#   --data-dir PATH       CIFAR-100 root (default: /home/seungu/mycode/Data)
-#   --out-dir PATH        save figures to directory (default: display only)
-#   --skip-confidence     skip Fig 2a/b/c (requires loading 60 model checkpoints)
+#   --data-dir PATH       CIFAR-100 root (default: data/)
+#   --out-dir PATH        save figures (default: display only)
+#   --skip-confidence     skip Fig 2a/b/c (requires 60 model checkpoints)
 ```
 
+Produces: `fig1a_feature_frequency.png`, `fig1b_common_feature_usage.png`, `fig2a/b/c` (confidence vs. feature count KDE), `fig2d_data_feature_count.png`.  
 Requires: `interaction_tensors/interaction_tensor_KD_models_20teacher.pt`  
 For Fig 2a/b/c also requires: `checkpoints/KDmodels/`, `checkpoints/Basemodels/`, `checkpoints/Teachers/`
 
@@ -110,51 +115,61 @@ For Fig 2a/b/c also requires: `checkpoints/KDmodels/`, `checkpoints/Basemodels/`
 uv run python analysis/analyze_cd.py --out-dir figures/
 ```
 
+Produces: `fig3a_feature_frequency.png`, `fig3b_data_feature_count.png`.  
 Requires: `interaction_tensors/interaction_tensor_B_SCD_model.pt`
 
 ### Section 4.1 — Confusion ≈ Dark Knowledge
 
 ```bash
-uv run python analysis/analyze_confusion.py --out-dir figures/
-# Options:
-#   --teacher-ckpt PATH   path to ResNet-152 checkpoint
-#   --baseline-ckpt PATH  path to ResNet-18 baseline checkpoint
+uv run python analysis/analyze_confusion.py --out-dir figures/ \
+    --teacher-ckpt  checkpoints/<your-resnet152-run>/resnet152-200-best.pth \
+    --baseline-ckpt checkpoints/Basemodels/bm1.pth
 ```
 
-Requires: `checkpoints/resnet/resnet152/Tuesday_18_November_2025_16h_22m_05s/resnet152-200-best.pth`  
-and `checkpoints/Basemodels/bm1.pth`
+Computes per-class cosine similarity, Pearson r, Spearman r, and soft IoU between the teacher's class-wise average softmax and the baseline's confusion ratio (diagonal excluded).  
+Expected output: Pearson r ≈ 0.85, mean cosine ≈ 0.76, mean Jaccard ≈ 0.38.
 
 ### Table 2 — Accuracy Comparison
 
 ```bash
-uv run python analysis/evaluate_models.py
-# Option:
-#   --data-dir PATH       CIFAR-100 root
+uv run python analysis/evaluate_models.py --data-dir data/
 ```
 
-Requires locally trained checkpoints in `checkpoints/resnet/`, `checkpoints/densenet121/`, `checkpoints/cs_kd/`, `checkpoints/ps_kd/`.
+Fill in the checkpoint paths at the top of each method block in [analysis/evaluate_models.py](analysis/evaluate_models.py). Empty lists are skipped with a `(skipped)` message.
 
-> **Note:** DenseNet-121 CD-200 checkpoints are not available; `evaluate_models.py` reproduces all other rows in Table 2 (ResNet-18/34/50 all methods, DenseNet-121 Baseline/CS-KD/PS-KD/CD-300).
+> **Note**: DenseNet-121 CD-200 checkpoints are not available in this release; all other rows in Table 2 are reproducible.
 
 ---
 
 ## Reproducing Training
 
-### Baseline & CD
+### Baseline
 
 ```bash
 cd training/
+uv run python train.py -net resnet18      # or resnet34, resnet50, densenet121
+```
 
-# Baseline ResNet-18
-uv run python train.py -net resnet18
+### Knowledge Distillation (Section 3)
 
-# Confusion Distillation ResNet-18 (300 epochs)
+```bash
+cd training/
+uv run python train_kd.py -net resnet18 \
+    --teacher_net resnet152 \
+    --teacher_weights <path-to-teacher.pth> \
+    --temperature 2 --alpha 0.85
+```
+
+### Confusion Distillation (Section 4, best config)
+
+```bash
+cd training/
 uv run python train_cd.py -net resnet18 \
     --transition_epoch 30 30 60 30 150 \
     --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
 ```
 
-See `scripts/run_command.sh` for full commands including ResNet-34/50 and DenseNet-121.
+See [scripts/run_command.sh](scripts/run_command.sh) for commands for all architectures (ResNet-34/50, DenseNet-121).
 
 ### CS-KD Baseline
 
@@ -176,17 +191,18 @@ uv run python main.py --dataset cifar100 --classifier_type ResNet18 \
 
 ## Interaction Tensor Construction
 
-To recompute IT tensors from scratch (instead of downloading pre-computed ones):
+To recompute IT tensors from trained checkpoints:
 
-```bash
-# 1. Train 20 baseline models and 20 KD student models (see scripts/run_command.sh)
-# 2. Open analysis/1_kd_analysis.ipynb and run cells 1–37
-#    (cells 28–37 build and save interaction_tensor_KD_models_20teacher.pt)
-# 3. Open analysis/2_cd_it_analysis.ipynb and run cells 1–25
-#    (builds interaction_tensor_B_SCD_model.pt)
 ```
-
-The IT construction pipeline: hook activations from `conv5_x` → PCA(50) → correlation matrix → greedy clustering (Algorithm 1) → threshold → binary tensor Ω ∈ {0,1}^{M×N×T}.
+1. Train 20 independent baseline models + 20 KD student models + 20 teacher models
+2. Open analysis/1_kd_analysis.ipynb — run cells that compute the IT:
+   - Hook conv5_x layer activations
+   - PCA(50) per model
+   - Greedy cross-model correlation clustering (Algorithm 1 in paper)
+   - Threshold → binary Ω ∈ {0,1}^{M×N×T}
+   - Saves interaction_tensor_KD_models_20teacher.pt
+3. For the CD tensor, open analysis/2_cd_it_analysis.ipynb
+```
 
 ---
 
@@ -194,11 +210,36 @@ The IT construction pipeline: hook activations from `conv5_x` → PCA(50) → co
 
 | Parameter | Value | Description |
 |---|---|---|
-| Temperature T | 2.0 | Soft label temperature |
-| Loss weights | 0.7 : 0.3 | soft_w : ce_w during training |
-| EMA momentum μ | 0.9 | Confusion matrix smoothing |
-| Label smoothing | 0.1 | Initial smoothing matrix S |
-| Phase schedule | 3:3:6:3:15 | CD phase alternation (×300 epochs) |
+| Temperature T | 2.0 | Soft label temperature (KD and CD) |
+| KD loss ratio (soft:hard) | 0.85 : 0.15 | Used when training KD students (Section 3.1) |
+| CD loss ratio (soft:hard) | 0.7 : 0.3 | Best CD configuration (Table 1) |
+| EMA momentum μ | 0.9 | Confusion matrix smoothing (Eq. 6) |
+| Label smoothing ε | 0.1 | Initial smoothing matrix S (Eq. 7) |
+| Phase schedule | 3:3:6:3:15 | CD phase alternation × 300 epochs (Table 1) |
+| Weight decay | 5×10⁻⁴ | SGD optimizer |
+
+The phase schedule `3:3:6:3:15` over 300 epochs means:
+```
+Epoch   0– 30: Hard (CE only)
+Epoch  30– 60: Soft (CD + CE)
+Epoch  60–120: Hard
+Epoch 120–150: Soft
+Epoch 150–300: Hard (stable)
+```
+
+---
+
+## Main Results (Table 2, CIFAR-100)
+
+| Method | Epochs | ResNet-18 | ResNet-34 | ResNet-50 | DenseNet-121 |
+|---|---|---|---|---|---|
+| Baseline | 200 | 75.86±.09 | 77.61±.35 | 78.48±.56 | 79.03±.11 |
+| CS-KD | 200 | 76.38±.17 | 76.73±.06 | 76.31±.36 | 76.53±.58 |
+| PS-KD | 300 | 77.41±.22 | 77.33±.12 | 78.41±.31 | 79.84±.23 |
+| CD (Ours) | 200 | 76.85±.10 | 77.87±.08 | 78.63±.21 | 78.71±.18 |
+| **CD (Ours)** | **300** | **77.13±.01** | **78.53±.22** | **79.38±.23** | 79.64±.22 |
+
+Top-1 accuracy, mean ± std over 3 runs. Bold = best among self-distillation methods.
 
 ---
 
@@ -206,9 +247,10 @@ The IT construction pipeline: hook activations from `conv5_x` → PCA(50) → co
 
 ```bibtex
 @inproceedings{kang2026wdsl,
-  title     = {What Do Students Learn? A Feature-Level Analysis of Dark Knowledge},
+  title     = {What Do Students Learn? {A} Feature-Level Analysis of Dark Knowledge},
   author    = {Kang, Seungu and Kim, Songkuk},
-  booktitle = {International Conference on Pattern Recognition (ICPR)},
-  year      = {2026}
+  booktitle = {Proceedings of the International Conference on Pattern Recognition (ICPR)},
+  year      = {2026},
+  note      = {arXiv:2606.03052}
 }
 ```
