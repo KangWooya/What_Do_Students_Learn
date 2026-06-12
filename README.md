@@ -243,6 +243,18 @@ Top-1 accuracy, mean ± std over 3 runs. Bold = best among self-distillation met
 
 ---
 
+## Acknowledgments
+
+This repository builds on the following open-source codebases:
+
+- **pytorch-cifar100** (baseline and CD training): [weiaicunzai/pytorch-cifar100](https://github.com/weiaicunzai/pytorch-cifar100)
+- **CS-KD** (baseline comparison): [alinlab/cs-kd](https://github.com/alinlab/cs-kd)
+- **PS-KD-Pytorch** (baseline comparison): [lgcnsai/PS-KD-Pytorch](https://github.com/lgcnsai/PS-KD-Pytorch)
+
+This work was supported in part by IITP grants (No. RS-2024-00395824, No. RS-2025-02214652) funded by the Korea Government (MSIT).
+
+---
+
 ## Citation
 
 ```bibtex
