@@ -11,7 +11,7 @@ We analyze how Knowledge Distillation (KD) changes student feature representatio
 
 1. **KD as feature-level regularization**: KD prunes low-frequency, sample-specific features and promotes a compact set of highly reusable ones. Student models learn 250 fewer features than baselines (531 → 281) while achieving higher average activation frequencies (1329 → 2121 per feature).
 
-2. **Confusion = Dark Knowledge**: The dataset-level confusion matrix encodes inter-class similarity analogous to the teacher's soft targets (Pearson r ≈ 0.87, cosine ≈ 0.78). The confusion ratio does not replicate fine-grained probability values but captures a coarse inter-class similarity structure.
+2. **Confusion = Dark Knowledge**: The dataset-level confusion matrix encodes inter-class similarity analogous to the teacher's soft targets (Pearson r ≈ 0.85, cosine ≈ 0.76). The confusion ratio does not replicate fine-grained probability values but captures a coarse inter-class similarity structure.
 
 3. **Confusion Distillation (CD)**: A teacher-free self-distillation method that uses the model's own EMA-smoothed confusion matrix as dynamic soft targets. On ResNet-34 and ResNet-50 for CIFAR-100, CD outperforms CS-KD and PS-KD by ~1.2%.
 
@@ -156,7 +156,7 @@ uv run python analysis/analyze_confusion.py --out-dir figures/
 ```
 
 Computes per-class cosine similarity, Pearson r, Spearman r, and soft IoU between the teacher's class-wise average softmax and the baseline's confusion ratio (diagonal excluded).  
-Expected output: Pearson r ≈ 0.87, mean cosine ≈ 0.78, mean Jaccard ≈ 0.38.
+Expected output with the released default checkpoints: Pearson r ≈ 0.85, mean cosine ≈ 0.76, mean soft IoU ≈ 0.38 (matching the paper's Section 4.1).
 
 ### Table 2 — Accuracy Comparison
 

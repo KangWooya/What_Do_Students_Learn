@@ -7,7 +7,7 @@ soft IoU between the teacher's average softmax outputs and the baseline's
 confusion matrix (both with self-prediction excluded).
 
 Key results reported in the paper:
-  Pearson r ≈ 0.87,  cosine ≈ 0.78
+  Pearson r ≈ 0.85,  cosine ≈ 0.76
 """
 
 import argparse
