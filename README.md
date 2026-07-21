@@ -65,7 +65,9 @@ uv sync          # Creates .venv and installs all dependencies
 
 ## Data & Pre-computed Tensors
 
-**Interaction Tensor files** (required for Figures 1–3) are hosted on HuggingFace:
+All artifacts are hosted on HuggingFace: [KangWooya/WDSL-tensors](https://huggingface.co/datasets/KangWooya/WDSL-tensors) (a `dataset` repo).
+
+**Interaction Tensor files** (required for Figures 1–3):
 
 ```bash
 pip install huggingface-hub
@@ -73,7 +75,8 @@ python -c "
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id='KangWooya/WDSL-tensors',
                   repo_type='dataset',
-                  local_dir='interaction_tensors/')
+                  local_dir='interaction_tensors/',
+                  allow_patterns='*.pt')
 "
 ```
 
@@ -86,7 +89,29 @@ Each tensor encodes Ω ∈ {0,1}^{M×N×T} — binary indicator of which model u
 - `interaction_tensor_KD_models_20teacher.pt` shape `[60, 10000, T]`: `[0:20]` = KD students, `[20:40]` = baselines, `[40:60]` = teachers
 - `interaction_tensor_B_SCD_model.pt` shape `[40, 10000, T]`: `[0:20]` = baselines, `[20:40]` = CD models
 
-**Model checkpoints** are not publicly released. Figures 1–3 reproduce fully from the pre-computed tensors. `analyze_confusion.py` and `evaluate_models.py` require locally trained checkpoints (see Training below).
+**Model checkpoints** (required for Table 2 and Section 4.1) are in the same repo under `checkpoints/`:
+
+```bash
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='KangWooya/WDSL-tensors',
+                  repo_type='dataset',
+                  local_dir='.',
+                  allow_patterns='checkpoints/*')
+"
+```
+
+This creates `checkpoints/` with the layout expected by the analysis scripts:
+
+```
+checkpoints/
+├── section_4_1/teacher_resnet152.pth
+└── table2/<method>/<arch>/run{1,2,3}.pth
+    # method ∈ {baseline, cs-kd, ps-kd, cd-200, cd-300}
+    # arch   ∈ {resnet18, resnet34, resnet50, densenet121}
+```
+
+> **Note**: DenseNet-121 CD-200ep checkpoints were lost and are the only cell of Table 2 not reproducible from the released checkpoints (the training command is still provided in [scripts/run_command.sh](scripts/run_command.sh)). Every other cell reproduces the paper within ±0.1%.
 
 **CIFAR-100** is downloaded automatically on first run. Set `DATA_DIR` at the top of each script to your preferred download location.
 
@@ -121,22 +146,26 @@ Requires: `interaction_tensors/interaction_tensor_B_SCD_model.pt`
 
 ### Section 4.1 — Confusion ≈ Dark Knowledge
 
+Uses the released checkpoints by default (`checkpoints/section_4_1/teacher_resnet152.pth` and `checkpoints/table2/baseline/resnet18/run1.pth`):
+
 ```bash
-uv run python analysis/analyze_confusion.py --out-dir figures/ \
-    --teacher-ckpt  checkpoints/<your-resnet152-run>/resnet152-200-best.pth \
-    --baseline-ckpt checkpoints/Basemodels/bm1.pth
+uv run python analysis/analyze_confusion.py --out-dir figures/
+# Override with your own:
+#   --teacher-ckpt  PATH   ResNet-152 checkpoint (.pth)
+#   --baseline-ckpt PATH   ResNet-18 baseline checkpoint (.pth)
 ```
 
 Computes per-class cosine similarity, Pearson r, Spearman r, and soft IoU between the teacher's class-wise average softmax and the baseline's confusion ratio (diagonal excluded).  
-Expected output: Pearson r ≈ 0.85, mean cosine ≈ 0.76, mean Jaccard ≈ 0.38.
+Expected output: Pearson r ≈ 0.87, mean cosine ≈ 0.78, mean Jaccard ≈ 0.38.
 
 ### Table 2 — Accuracy Comparison
 
 ```bash
 uv run python analysis/evaluate_models.py --data-dir data/
+# --ckpt-dir PATH   root of the downloaded checkpoints/ (default: ./checkpoints)
 ```
 
-Fill in the checkpoint paths at the top of each method block in [analysis/evaluate_models.py](analysis/evaluate_models.py). Empty lists are skipped with a `(skipped)` message.
+Evaluates all methods × architectures (3 runs each) from `checkpoints/table2/` and prints Top-1/Top-5 mean ± std. Any cell whose checkpoints are absent is skipped with a message (only DenseNet-121 CD-200ep, see note above).
 
 ---
 

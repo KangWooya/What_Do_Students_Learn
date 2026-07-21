@@ -30,9 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR  = Path("data/")   # set to your CIFAR-100 root
 CKPT_DIR  = str(REPO_ROOT / "checkpoints")
 
-# Set these to your own checkpoints
-TEACHER_CKPT  = ""   # e.g. "checkpoints/resnet/resnet152/<run>/resnet152-200-best.pth"
-BASELINE_CKPT = ""   # e.g. "checkpoints/Basemodels/bm1.pth"
+# Defaults point at the checkpoints released on HuggingFace (see README).
+# Override with --teacher-ckpt / --baseline-ckpt to use your own.
+TEACHER_CKPT  = str(REPO_ROOT / "checkpoints/section_4_1/teacher_resnet152.pth")
+BASELINE_CKPT = str(REPO_ROOT / "checkpoints/table2/baseline/resnet18/run1.pth")
 # ──────────────────────────────────────────────────────────────────────────
 
 
@@ -245,12 +246,13 @@ def main():
     parser.add_argument("--out-dir",       default=None)
     args = parser.parse_args()
 
-    if not args.teacher_ckpt or not args.baseline_ckpt:
-        parser.error(
-            "Checkpoint paths are required.\n"
-            "  --teacher-ckpt  path to ResNet-152 checkpoint (.pth)\n"
-            "  --baseline-ckpt path to ResNet-18 baseline checkpoint (.pth)"
-        )
+    for name, path in [("teacher", args.teacher_ckpt), ("baseline", args.baseline_ckpt)]:
+        if not path or not os.path.exists(path):
+            parser.error(
+                f"{name} checkpoint not found: {path!r}\n"
+                "Download the checkpoints from HuggingFace (see README) into ./checkpoints/,\n"
+                "or pass --teacher-ckpt / --baseline-ckpt explicitly."
+            )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

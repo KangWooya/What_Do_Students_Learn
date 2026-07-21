@@ -6,6 +6,14 @@ configuration (3 runs each), printing Top-1 and Top-5 mean ± std.
 
 Architectures: ResNet-18, ResNet-34, ResNet-50, DenseNet-121
 Methods:       Baseline, CS-KD, PS-KD, CD-200ep, CD-300ep
+
+Checkpoints are hosted on HuggingFace (KangWooya/WDSL-tensors, under
+checkpoints/). Download them into ./checkpoints/ (see README) and run:
+
+    uv run python analysis/evaluate_models.py
+
+The checkpoints/ layout mirrors the paths below:
+    checkpoints/table2/<method>/<arch>/run{1,2,3}.pth
 """
 
 import argparse
@@ -120,6 +128,11 @@ def build_and_eval(model_py, builder_name, ckpt_paths, testloader, device, build
     if not ckpt_paths:
         print(f"  [{builder_name}]  (skipped — no checkpoints provided)")
         return None, None
+    missing = [p for p in ckpt_paths if not os.path.exists(p)]
+    if missing:
+        print(f"  [{builder_name}]  (skipped — {len(missing)}/{len(ckpt_paths)} checkpoints not found; "
+              f"download from HuggingFace, see README)")
+        return None, None
     m = import_from_path(f"m_{hash(model_py) % 10**8}", model_py)
     accs1, accs5 = [], []
     for p in ckpt_paths:
@@ -130,211 +143,72 @@ def build_and_eval(model_py, builder_name, ckpt_paths, testloader, device, build
     mean1, std1 = statistics.mean(accs1), statistics.pstdev(accs1)
     mean5, std5 = statistics.mean(accs5), statistics.pstdev(accs5)
     print(f"  [{builder_name}]  Top-1: {mean1:.2f} ± {std1:.2f}%   "
-          f"Top-5: {mean5:.2f} ± {std5:.2f}%   runs={accs1}")
+          f"Top-5: {mean5:.2f} ± {std5:.2f}%   runs={[round(a, 2) for a in accs1]}")
     return mean1, std1
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate all methods for Table 2")
     parser.add_argument("--data-dir", default=str(DATA_DIR))
+    parser.add_argument("--ckpt-dir", default=CKPT_DIR,
+                        help="Root of the downloaded checkpoints/ directory")
     args = parser.parse_args()
 
+    ckpt = args.ckpt_dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     testloader = make_testloader(args.data_dir)
 
-    # ── ResNet-18 ──────────────────────────────────────────────────────────
-    print("\n═══════════════ ResNet-18 ═══════════════")
+    # Model builders per method (CIFAR-100 variants from each source repo)
+    RESNET = f"{TRAIN_DIR}/models/resnet.py"          # baseline + CD (pytorch-cifar100)
+    DENSE  = f"{TRAIN_DIR}/models/densenet.py"
+    CSKD_R = f"{BASE_DIR}/cs-kd/models/resnet.py"
+    CSKD_D = f"{BASE_DIR}/cs-kd/models/densenet3.py"
+    PSKD_R = f"{BASE_DIR}/ps-kd/models/preact_resnet.py"
+    PSKD_D = f"{BASE_DIR}/ps-kd/models/densenet_cifar.py"
 
-    print("\n[Baseline]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet18",
-        [
-            # fill in your 3 checkpoint paths, e.g.:
-            # f"{CKPT_DIR}/resnet/resnet18/<run1>/resnet18-XXX-best.pth",
+    def runs(method, arch):
+        return [f"{ckpt}/table2/{method}/{arch}/run{i}.pth" for i in (1, 2, 3)]
+
+    # (label, model_py, builder, ckpt_list, kwargs)
+    plan = {
+        "resnet18": [
+            ("Baseline",    RESNET, "resnet18",                    runs("baseline", "resnet18"), None),
+            ("CS-KD",       CSKD_R, "CIFAR_ResNet18",              runs("cs-kd", "resnet18"), {"num_classes": 100}),
+            ("PS-KD",       PSKD_R, "CIFAR_ResNet18_preActBasic",  runs("ps-kd", "resnet18"), {"num_classes": 100}),
+            ("CD (200 ep)", RESNET, "resnet18",                    runs("cd-200", "resnet18"), None),
+            ("CD (300 ep)", RESNET, "resnet18",                    runs("cd-300", "resnet18"), None),
         ],
-        testloader, device,
-    )
-
-    print("\n[CS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/cs-kd/models/resnet.py", "CIFAR_ResNet18",
-        [
-            # f"{CKPT_DIR}/cs_kd/results/cifar100/CIFAR_ResNet18/<run>/ckpt.t7",
+        "resnet34": [
+            ("Baseline",    RESNET, "resnet34",                    runs("baseline", "resnet34"), None),
+            ("CS-KD",       CSKD_R, "CIFAR_ResNet34",              runs("cs-kd", "resnet34"), {"num_classes": 100}),
+            ("PS-KD",       PSKD_R, "CIFAR_ResNet34_preActBasic",  runs("ps-kd", "resnet34"), {"num_classes": 100}),
+            ("CD (200 ep)", RESNET, "resnet34",                    runs("cd-200", "resnet34"), None),
+            ("CD (300 ep)", RESNET, "resnet34",                    runs("cd-300", "resnet34"), None),
         ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[PS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/ps-kd/models/preact_resnet.py", "CIFAR_ResNet18_preActBasic",
-        [
-            # f"{CKPT_DIR}/ps_kd/runs/pskd_resnet18_cifar100/<run>/model/checkpoint_best.pth",
+        "resnet50": [
+            ("Baseline",    RESNET, "resnet50",                    runs("baseline", "resnet50"), None),
+            ("CS-KD",       CSKD_R, "CIFAR_ResNet50",              runs("cs-kd", "resnet50"), {"num_classes": 100}),
+            ("PS-KD",       PSKD_R, "CIFAR_ResNet50_Bottle",       runs("ps-kd", "resnet50"), {"num_classes": 100}),
+            ("CD (200 ep)", RESNET, "resnet50",                    runs("cd-200", "resnet50"), None),
+            ("CD (300 ep)", RESNET, "resnet50",                    runs("cd-300", "resnet50"), None),
         ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[CD (200 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet18",
-        [
-            # f"{CKPT_DIR}/resnet/resnet18/<run>/resnet18-XXX-best.pth",
+        "densenet121": [
+            ("Baseline",    DENSE,  "densenet121",                 runs("baseline", "densenet121"), None),
+            ("CS-KD",       CSKD_D, "CIFAR_DenseNet121",           runs("cs-kd", "densenet121"), {"num_classes": 100}),
+            ("PS-KD",       PSKD_D, "CIFAR_DenseNet121",           runs("ps-kd", "densenet121"), {"num_classes": 100}),
+            # CD-200 DenseNet-121 checkpoints were lost and are not reproducible from
+            # this release; the training command is provided in scripts/run_command.sh.
+            ("CD (200 ep)", DENSE,  "densenet121",                 [], None),
+            ("CD (300 ep)", DENSE,  "densenet121",                 runs("cd-300", "densenet121"), None),
         ],
-        testloader, device,
-    )
+    }
 
-    print("\n[CD (300 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet18",
-        [
-            # f"{CKPT_DIR}/resnet/resnet18/<run>/resnet18-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    # ── ResNet-34 ──────────────────────────────────────────────────────────
-    print("\n═══════════════ ResNet-34 ═══════════════")
-
-    print("\n[Baseline]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet34",
-        [
-            # f"{CKPT_DIR}/resnet/resnet34/<run>/resnet34-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/cs-kd/models/resnet.py", "CIFAR_ResNet34",
-        [
-            # f"{CKPT_DIR}/cs_kd/results/cifar100/CIFAR_ResNet34/<run>/ckpt.t7",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[PS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/ps-kd/models/preact_resnet.py", "CIFAR_ResNet34_preActBasic",
-        [
-            # f"{CKPT_DIR}/ps_kd/runs/pskd_resnet34_cifar100/<run>/model/checkpoint_best.pth",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[CD (200 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet34",
-        [
-            # f"{CKPT_DIR}/resnet/resnet34/<run>/resnet34-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CD (300 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet34",
-        [
-            # f"{CKPT_DIR}/resnet/resnet34/<run>/resnet34-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    # ── ResNet-50 ──────────────────────────────────────────────────────────
-    print("\n═══════════════ ResNet-50 ═══════════════")
-
-    print("\n[Baseline]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet50",
-        [
-            # f"{CKPT_DIR}/resnet/resnet50/<run>/resnet50-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/cs-kd/models/resnet.py", "CIFAR_ResNet50",
-        [
-            # f"{CKPT_DIR}/cs_kd/results/cifar100/CIFAR_ResNet50/<run>/ckpt.t7",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[PS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/ps-kd/models/preact_resnet.py", "CIFAR_ResNet50_Bottle",
-        [
-            # f"{CKPT_DIR}/ps_kd/runs/pskd_resnet50_cifar100/<run>/model/checkpoint_best.pth",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[CD (200 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet50",
-        [
-            # f"{CKPT_DIR}/resnet/resnet50/<run>/resnet50-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CD (300 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/resnet.py", "resnet50",
-        [
-            # f"{CKPT_DIR}/resnet/resnet50/<run>/resnet50-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    # ── DenseNet-121 ───────────────────────────────────────────────────────
-    print("\n═══════════════ DenseNet-121 ═══════════════")
-
-    print("\n[Baseline]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/densenet.py", "densenet121",
-        [
-            # f"{CKPT_DIR}/densenet121/<run>/densenet121-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/cs-kd/models/densenet3.py", "CIFAR_DenseNet121",
-        [
-            # f"{CKPT_DIR}/cs_kd/results/cifar100/CIFAR_DenseNet121/<run>/ckpt.t7",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[PS-KD]")
-    build_and_eval(
-        f"{BASE_DIR}/ps-kd/models/densenet_cifar.py", "CIFAR_DenseNet121",
-        [
-            # f"{CKPT_DIR}/ps_kd/runs/pskd_densenet121_cifar100/<run>/model/checkpoint_best.pth",
-        ],
-        testloader, device, builder_kwargs={"num_classes": 100},
-    )
-
-    print("\n[CD (200 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/densenet.py", "densenet121",
-        [
-            # f"{CKPT_DIR}/densenet121/<run>/densenet121-XXX-best.pth",
-        ],
-        testloader, device,
-    )
-
-    print("\n[CD (300 ep)]")
-    build_and_eval(
-        f"{TRAIN_DIR}/models/densenet.py", "densenet121",
-        [
-            # f"{CKPT_DIR}/densenet121/<run>/densenet121-XXX-best.pth",
-        ],
-        testloader, device,
-    )
+    for arch, rows in plan.items():
+        print(f"\n═══════════════ {arch} ═══════════════")
+        for label, model_py, builder, ckpts, kwargs in rows:
+            print(f"\n[{label}]")
+            build_and_eval(model_py, builder, ckpts, testloader, device, builder_kwargs=kwargs)
 
 
 if __name__ == "__main__":
