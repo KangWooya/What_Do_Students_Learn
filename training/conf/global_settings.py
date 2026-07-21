@@ -15,15 +15,13 @@ CIFAR100_TRAIN_STD = (0.2673342858792401, 0.2564384629170883, 0.2761504713256840
 #CIFAR100_TEST_MEAN = (0.5088964127604166, 0.48739301317401956, 0.44194221124387256)
 #CIFAR100_TEST_STD = (0.2682515741720801, 0.2573637364478126, 0.2770957707973042)
 
-#directory to save weights file
-CHECKPOINT_PATH = 'checkpoint'
+#directory to save weights file (override with WDSL_CKPT, e.g. a NAS path on a cluster)
+CHECKPOINT_PATH = os.environ.get('WDSL_CKPT', 'checkpoint')
 
-#total training epoches
-EPOCH = 300
-MILESTONES = [90, 180, 240]
-
-# EPOCH = 200
-# MILESTONES = [60, 120, 160]
+#total training epoches (override with WDSL_EPOCH: 300 = best config, 200 = CD-200ep)
+EPOCH = int(os.environ.get('WDSL_EPOCH', '300'))
+#LR-decay milestones at 30% / 60% / 80% of training (→ [90,180,240] for 300ep, [60,120,160] for 200ep)
+MILESTONES = [int(EPOCH * 0.3), int(EPOCH * 0.6), int(EPOCH * 0.8)]
 
 #initial learning rate
 #INIT_LR = 0.1

@@ -15,7 +15,7 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-datapath = "data/"
+datapath = os.environ.get("WDSL_DATA", "data/")   # override with WDSL_DATA (e.g. a NAS path on a cluster)
 
 def get_network(args):
     """ return given network
