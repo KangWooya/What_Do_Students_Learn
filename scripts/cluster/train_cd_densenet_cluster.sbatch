@@ -31,6 +31,14 @@ export WDSL_DATA="$SCRATCH/data"
 export WDSL_CKPT="$SCRATCH/checkpoint/run${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$WDSL_CKPT"
 
+# Rule 1.6: compute nodes MUST NOT download. Fail fast if CIFAR-100 was not
+# pre-staged on NAS from a login node (torchvision would otherwise download here).
+if [ ! -d "$WDSL_DATA/cifar-100-python" ]; then
+    echo "ERROR: CIFAR-100 not found at $WDSL_DATA/cifar-100-python"
+    echo "Stage it from a login node first (see README/instructions); compute nodes must not download."
+    exit 1
+fi
+
 echo "Task ${SLURM_ARRAY_TASK_ID} on $(hostname) | data=$WDSL_DATA | ckpt=$WDSL_CKPT"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
