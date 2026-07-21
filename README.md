@@ -72,6 +72,7 @@ pip install huggingface-hub
 python -c "
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id='KangWooya/WDSL-tensors',
+                  repo_type='dataset',
                   local_dir='interaction_tensors/')
 "
 ```
@@ -159,10 +160,11 @@ MILESTONES = [60, 120, 160]
 
 ```bash
 cd training/
-uv run python train_kd.py -net resnet18 \
-    --teacher resnet152 \
-    --teacher_weights <path-to-resnet152-best.pth> \
-    --temp 2.0 --alpha 0.85
+uv run python train_kd.py -net resnet18 -gpu \
+    --kd \
+    --teacher_net resnet152 \
+    --teacher_path <path-to-resnet152-best.pth> \
+    --kd_T 2.0 --kd_alpha 0.85
 ```
 
 ### Confusion Distillation (Section 4)
@@ -182,9 +184,10 @@ Epoch 120–200  Hard (stable)
 ```bash
 # conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
 cd training/
-uv run python train_cd.py -net resnet18 \
+uv run python train_cd.py -net resnet18 -gpu \
+    --confkd \
     --transition_epoch 30 30 30 30 80 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 ```
 
 **Phase schedule for 300 epochs** — ratio 3:3:6:3:15, boundaries at every 10 epochs (best config, Table 1):
@@ -200,9 +203,10 @@ Epoch 150–300  Hard (stable)
 ```bash
 # conf/global_settings.py: EPOCH=300, MILESTONES=[90,180,240]
 cd training/
-uv run python train_cd.py -net resnet18 \
+uv run python train_cd.py -net resnet18 -gpu \
+    --confkd \
     --transition_epoch 30 30 60 30 150 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 ```
 
 Replace `-net resnet18` with `resnet34`, `resnet50`, or `densenet121` as needed. See [scripts/run_command.sh](scripts/run_command.sh) for all architectures.

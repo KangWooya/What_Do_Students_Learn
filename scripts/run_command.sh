@@ -32,10 +32,11 @@ uv run python train.py -net densenet121
 # ──────────────────────────────────────────────────────────────
 cd "$TRAIN"
 uv run python train_kd.py \
-    -net resnet18 \
-    --teacher resnet152 \
-    --teacher_weights <path-to-resnet152-best.pth> \
-    --temp 2.0 --alpha 0.85
+    -net resnet18 -gpu \
+    --kd \
+    --teacher_net resnet152 \
+    --teacher_path <path-to-resnet152-best.pth> \
+    --kd_T 2.0 --kd_alpha 0.85
 
 # ──────────────────────────────────────────────────────────────
 # Confusion Distillation — 200 epoch
@@ -43,21 +44,21 @@ uv run python train_kd.py \
 # conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
 # ──────────────────────────────────────────────────────────────
 cd "$TRAIN"
-uv run python train_cd.py -net resnet18 \
+uv run python train_cd.py -net resnet18 -gpu --confkd \
     --transition_epoch 30 30 30 30 80 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net resnet34 \
+uv run python train_cd.py -net resnet34 -gpu --confkd \
     --transition_epoch 30 30 30 30 80 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net resnet50 \
+uv run python train_cd.py -net resnet50 -gpu --confkd \
     --transition_epoch 30 30 30 30 80 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net densenet121 \
+uv run python train_cd.py -net densenet121 -gpu --confkd \
     --transition_epoch 30 30 30 30 80 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
 # ──────────────────────────────────────────────────────────────
 # Confusion Distillation — 300 epoch (best config, Table 1)
@@ -65,21 +66,21 @@ uv run python train_cd.py -net densenet121 \
 # conf/global_settings.py: EPOCH=300, MILESTONES=[90,180,240]
 # ──────────────────────────────────────────────────────────────
 cd "$TRAIN"
-uv run python train_cd.py -net resnet18 \
+uv run python train_cd.py -net resnet18 -gpu --confkd \
     --transition_epoch 30 30 60 30 150 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net resnet34 \
+uv run python train_cd.py -net resnet34 -gpu --confkd \
     --transition_epoch 30 30 60 30 150 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net resnet50 \
+uv run python train_cd.py -net resnet50 -gpu --confkd \
     --transition_epoch 30 30 60 30 150 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
-uv run python train_cd.py -net densenet121 \
+uv run python train_cd.py -net densenet121 -gpu --confkd \
     --transition_epoch 30 30 60 30 150 \
-    --soft_w 0.7 --ce_w 0.3 --temperature 2.0 --ema_momentum 0.9
+    --soft_w 0.7 --ce_w 0.3 --T 2.0 --ema 0.9
 
 # ──────────────────────────────────────────────────────────────
 # CS-KD (200 epoch)
