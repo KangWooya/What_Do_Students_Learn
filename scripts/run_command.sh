@@ -21,10 +21,10 @@ PSKD="$REPO_ROOT/baselines/ps-kd"
 # conf/global_settings.py: EPOCH=200, MILESTONES=[60,120,160]
 # ──────────────────────────────────────────────────────────────
 cd "$TRAIN"
-uv run python train.py -net resnet18
-uv run python train.py -net resnet34
-uv run python train.py -net resnet50
-uv run python train.py -net densenet121
+uv run python train.py -net resnet18 -gpu
+uv run python train.py -net resnet34 -gpu
+uv run python train.py -net resnet50 -gpu
+uv run python train.py -net densenet121 -gpu
 
 # ──────────────────────────────────────────────────────────────
 # Knowledge Distillation — ResNet-18 student, ResNet-152 teacher

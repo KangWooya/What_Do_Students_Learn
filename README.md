@@ -146,7 +146,7 @@ Fill in the checkpoint paths at the top of each method block in [analysis/evalua
 
 ```bash
 cd training/
-uv run python train.py -net resnet18      # or resnet34, resnet50, densenet121
+uv run python train.py -net resnet18 -gpu      # or resnet34, resnet50, densenet121
 ```
 
 The epoch count and LR milestones are set in [training/conf/global_settings.py](training/conf/global_settings.py):
