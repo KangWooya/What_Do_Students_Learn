@@ -111,7 +111,7 @@ checkpoints/
     # arch   ∈ {resnet18, resnet34, resnet50, densenet121}
 ```
 
-> **Note**: DenseNet-121 CD-200ep checkpoints were lost and are the only cell of Table 2 not reproducible from the released checkpoints (the training command is still provided in [scripts/run_command.sh](scripts/run_command.sh)). Every other cell reproduces the paper within ±0.1%.
+> **Note**: The original DenseNet-121 CD-200ep checkpoints were lost, so these three were **retrained** with the same recipe ([scripts/cluster/train_cd_densenet_cluster.sbatch](scripts/cluster/train_cd_densenet_cluster.sbatch)); they reproduce the CD-200ep DenseNet-121 result at 79.15 ± 0.22 (paper: 78.71 ± 0.18). Every other cell reproduces the paper within ±0.1% from the original checkpoints.
 
 **CIFAR-100** is downloaded automatically on first run. Set `DATA_DIR` at the top of each script to your preferred download location.
 
@@ -165,7 +165,7 @@ uv run python analysis/evaluate_models.py --data-dir data/
 # --ckpt-dir PATH   root of the downloaded checkpoints/ (default: ./checkpoints)
 ```
 
-Evaluates all methods × architectures (3 runs each) from `checkpoints/table2/` and prints Top-1/Top-5 mean ± std. Any cell whose checkpoints are absent is skipped with a message (only DenseNet-121 CD-200ep, see note above).
+Evaluates all methods × architectures (3 runs each) from `checkpoints/table2/` and prints Top-1/Top-5 mean ± std. All 20 cells are covered by the released checkpoints (DenseNet-121 CD-200ep is retrained — see note above).
 
 ---
 

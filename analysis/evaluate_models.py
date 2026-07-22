@@ -197,9 +197,9 @@ def main():
             ("Baseline",    DENSE,  "densenet121",                 runs("baseline", "densenet121"), None),
             ("CS-KD",       CSKD_D, "CIFAR_DenseNet121",           runs("cs-kd", "densenet121"), {"num_classes": 100}),
             ("PS-KD",       PSKD_D, "CIFAR_DenseNet121",           runs("ps-kd", "densenet121"), {"num_classes": 100}),
-            # CD-200 DenseNet-121 checkpoints were lost and are not reproducible from
-            # this release; the training command is provided in scripts/run_command.sh.
-            ("CD (200 ep)", DENSE,  "densenet121",                 [], None),
+            # DenseNet-121 CD-200ep: original checkpoints were lost; these are freshly
+            # retrained with the same recipe (reproduce at 79.15 ± 0.22; paper 78.71 ± 0.18).
+            ("CD (200 ep)", DENSE,  "densenet121",                 runs("cd-200", "densenet121"), None),
             ("CD (300 ep)", DENSE,  "densenet121",                 runs("cd-300", "densenet121"), None),
         ],
     }
